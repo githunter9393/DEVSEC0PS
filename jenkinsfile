@@ -1,0 +1,114 @@
+pipeline  {
+    agent any
+
+    environment {
+        // DockerHub credentials
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds')
+        IMAGE_NAME = 'your_dockerhub_username/python-app'
+        CONTAINER_NAME = 'python-app'
+    }
+
+    stages {
+        stage('Checkout Code') {
+            steps {
+                git url: 'https://github.com/your-repo-url.git', branch: 'main'
+            }
+        }
+
+        stage('Static Code Analysis (SAST)') {
+            steps {
+                script {
+                    // Run Bandit to perform static code analysis
+                    sh 'pip install bandit'
+                    sh 'bandit -r .'
+                }
+            }
+        }
+
+        stage('Dependency Scanning') {
+            steps {
+                script {
+                    // Run Safety to check for known vulnerabilities in Python dependencies
+                    sh 'pip install safety'
+                    sh 'safety check'
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    // Build the Docker image
+                    sh 'docker build -t ${IMAGE_NAME} .'
+                }
+            }
+        }
+
+        stage('Image Vulnerability Scanning') {
+            steps {
+                script {
+                    // Install Trivy and scan the Docker image for vulnerabilities
+                    sh 'wget https://github.com/aquasecurity/trivy/releases/download/v0.38.2/trivy_0.38.2_Linux-64bit.deb'
+                    sh 'sudo dpkg -i trivy_0.38.2_Linux-64bit.deb'
+                    sh 'trivy image ${IMAGE_NAME}'
+                }
+            }
+        }
+
+        stage('Run Docker Container') {
+            steps {
+                script {
+                    // Run the containerized app
+                    sh 'docker run -d -p 5000:5000 --name ${CONTAINER_NAME} ${IMAGE_NAME}'
+                }
+            }
+        }
+
+        stage('Dynamic Security Testing (DAST)') {
+            steps {
+                script {
+                    // Run OWASP ZAP in a Docker container to scan the running app
+                    sh 'docker pull owasp/zap2docker-stable'
+                    sh '''
+                    docker run --rm -v $(pwd):/zap/wrk:rw --network host owasp/zap2docker-stable zap-baseline.py -t http://localhost:5000 -r zap_report.html
+                    '''
+                    // Archive the ZAP report as an artifact
+                    archiveArtifacts artifacts: 'zap_report.html'
+                }
+            }
+        }
+
+        stage('Container Security Check') {
+            steps {
+                script {
+                    // Run Docker Bench Security to check for Docker best practices
+                    sh 'docker pull aquasec/docker-bench-security'
+                    sh 'docker run --net host --pid host --cap-add audit_control -v /var/run/docker.sock:/var/run/docker.sock aquasec/docker-bench-security'
+                }
+            }
+        }
+
+        stage('Push Docker Image to DockerHub') {
+            steps {
+                script {
+                    // Log in to DockerHub
+                    sh 'echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin'
+
+                    // Push the Docker image to DockerHub
+                    sh 'docker push ${IMAGE_NAME}'
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                // Clean up resources and workspace
+                sh 'docker stop ${CONTAINER_NAME}'
+                sh 'docker rm ${CONTAINER_NAME}'
+                sh 'docker system prune -f'
+            }
+        }
+    }
+}
