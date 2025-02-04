@@ -1,24 +1,24 @@
-pipeline  {
+pipeline {
     agent any
 
     environment {
         // DockerHub credentials
         DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds')
-        IMAGE_NAME = 'your_dockerhub_username/python-app'
-        CONTAINER_NAME = 'python-app'
+        IMAGE_NAME = 'dockerhub_user/test-app'
+        CONTAINER_NAME = 'test-app'
     }
 
     stages {
         stage('Checkout Code') {
             steps {
-                git url: 'https://github.com/your-repo-url.git', branch: 'main'
+                git url: 'https://github.com/application_repo-url.git', branch: 'main'
             }
         }
 
         stage('Static Code Analysis (SAST)') {
             steps {
                 script {
-                    // Run Bandit to perform static code analysis
+                    // static code analysis, scanning the source code for known vulnerabilities
                     sh 'pip install bandit'
                     sh 'bandit -r .'
                 }
@@ -28,7 +28,7 @@ pipeline  {
         stage('Dependency Scanning') {
             steps {
                 script {
-                    // Run Safety to check for known vulnerabilities in Python dependencies
+                    // scan for known vulnerabilities in libraries and other Python dependencies(as part of the SCA)
                     sh 'pip install safety'
                     sh 'safety check'
                 }
@@ -39,7 +39,7 @@ pipeline  {
             steps {
                 script {
                     // Build the Docker image
-                    sh 'docker build -t ${IMAGE_NAME} .'
+                    sh 'docker build -t ${test-app} .'
                 }
             }
         }
@@ -50,7 +50,7 @@ pipeline  {
                     // Install Trivy and scan the Docker image for vulnerabilities
                     sh 'wget https://github.com/aquasecurity/trivy/releases/download/v0.38.2/trivy_0.38.2_Linux-64bit.deb'
                     sh 'sudo dpkg -i trivy_0.38.2_Linux-64bit.deb'
-                    sh 'trivy image ${IMAGE_NAME}'
+                    sh 'trivy image ${test-app}'
                 }
             }
         }
@@ -59,7 +59,7 @@ pipeline  {
             steps {
                 script {
                     // Run the containerized app
-                    sh 'docker run -d -p 5000:5000 --name ${CONTAINER_NAME} ${IMAGE_NAME}'
+                    sh 'docker run -d -p 5000:5000 --name ${test-app} ${test-app}'
                 }
             }
         }
@@ -67,12 +67,12 @@ pipeline  {
         stage('Dynamic Security Testing (DAST)') {
             steps {
                 script {
-                    // Run OWASP ZAP in a Docker container to scan the running app
+                    // emulating an attack on a running application, to find common web app vulnerabilities
                     sh 'docker pull owasp/zap2docker-stable'
                     sh '''
                     docker run --rm -v $(pwd):/zap/wrk:rw --network host owasp/zap2docker-stable zap-baseline.py -t http://localhost:5000 -r zap_report.html
                     '''
-                    // Archive the ZAP report as an artifact
+                    // save the report as an artifact
                     archiveArtifacts artifacts: 'zap_report.html'
                 }
             }
@@ -81,7 +81,7 @@ pipeline  {
         stage('Container Security Check') {
             steps {
                 script {
-                    // Run Docker Bench Security to check for Docker best practices
+                    // check for Docker best practices
                     sh 'docker pull aquasec/docker-bench-security'
                     sh 'docker run --net host --pid host --cap-add audit_control -v /var/run/docker.sock:/var/run/docker.sock aquasec/docker-bench-security'
                 }
@@ -95,7 +95,7 @@ pipeline  {
                     sh 'echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin'
 
                     // Push the Docker image to DockerHub
-                    sh 'docker push ${IMAGE_NAME}'
+                    sh 'docker push ${test-app}'
                 }
             }
         }
@@ -105,8 +105,8 @@ pipeline  {
         always {
             script {
                 // Clean up resources and workspace
-                sh 'docker stop ${CONTAINER_NAME}'
-                sh 'docker rm ${CONTAINER_NAME}'
+                sh 'docker stop ${test-app}'
+                sh 'docker rm ${test-app}'
                 sh 'docker system prune -f'
             }
         }
